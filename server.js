@@ -38,6 +38,33 @@ app.get('/health', (req, res) => {
   res.json({ status: browser ? 'ready' : 'starting', uptime: process.uptime() });
 });
 
+// Debug endpoint — take screenshot of a Google search
+app.get('/debug', async (req, res) => {
+  const query = req.query.q || 'hello world';
+  if (!browser) return res.status(503).json({ error: 'Browser not ready' });
+  let page = null;
+  try {
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      locale: 'en-IN',
+      viewport: { width: 1280, height: 720 }
+    });
+    page = await context.newPage();
+    await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en&gl=in`, { waitUntil: 'networkidle', timeout: 20000 });
+    const screenshot = await page.screenshot({ fullPage: false });
+    const title = await page.title();
+    const html = await page.content();
+    const h3Count = (html.match(/<h3/g) || []).length;
+    await context.close();
+    log(`Debug: title="${title}", h3Count=${h3Count}`);
+    res.set('Content-Type', 'image/png');
+    res.send(screenshot);
+  } catch (err) {
+    if (page) try { await page.context().close(); } catch {}
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Search endpoint
 app.get('/search', async (req, res) => {
   const query = req.query.q;
