@@ -66,19 +66,29 @@ app.get('/search', async (req, res) => {
     });
     page = await context.newPage();
 
-    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en`;
+    // Use Google with consent bypass parameters
+    const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en&gl=in&consent=1`;
     log(`Searching: ${query}`);
 
-    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(searchUrl, { waitUntil: 'networkidle', timeout: 20000 });
 
-    // Wait for results to render
-    await page.waitForSelector('h3', { timeout: 10000 }).catch(() => {});
+    // Handle Google consent page if it appears
+    const consentButton = await page.$('button[id="L2AGLb"]');
+    if (consentButton) {
+      log('Consent page detected, accepting...');
+      await consentButton.click();
+      await page.waitForNavigation({ waitUntil: 'networkidle', timeout: 10000 }).catch(() => {});
+    }
 
-    // Extract search results
+    // Wait for results — try multiple selectors
+    await page.waitForSelector('h3, .g, [data-header-feature]', { timeout: 10000 }).catch(() => {});
+
+    // Extract search results using multiple strategies
     const results = await page.evaluate(() => {
       const items = [];
-      const headings = document.querySelectorAll('h3');
-      headings.forEach(h3 => {
+
+      // Strategy 1: h3 tags (standard Google)
+      document.querySelectorAll('h3').forEach(h3 => {
         const anchor = h3.closest('a');
         const title = h3.textContent?.trim();
         const url = anchor?.href || '';
@@ -86,8 +96,41 @@ app.get('/search', async (req, res) => {
           items.push({ title, url });
         }
       });
+
+      // Strategy 2: div.g result blocks (fallback)
+      if (items.length === 0) {
+        document.querySelectorAll('div.g').forEach(g => {
+          const titleEl = g.querySelector('h3, [role="heading"]');
+          const anchor = g.querySelector('a[href]');
+          const title = titleEl?.textContent?.trim();
+          const url = anchor?.href || '';
+          if (title && url && !url.includes('google.com')) {
+            items.push({ title, url });
+          }
+        });
+      }
+
+      // Strategy 3: any anchor with a heading inside
+      if (items.length === 0) {
+        document.querySelectorAll('a[href] [role="heading"]').forEach(heading => {
+          const anchor = heading.closest('a');
+          const title = heading.textContent?.trim();
+          const url = anchor?.href || '';
+          if (title && url && !url.includes('google.com')) {
+            items.push({ title, url });
+          }
+        });
+      }
+
       return items.slice(0, 5);
     });
+
+    // If still no results, log the page title for debugging
+    if (results.length === 0) {
+      const pageTitle = await page.title();
+      log(`No results found. Page title: "${pageTitle}"`);
+    }
+
 
     log(`Found ${results.length} results for: ${query}`);
     await context.close();
