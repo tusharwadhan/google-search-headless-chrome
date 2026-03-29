@@ -1,0 +1,13 @@
+{
+  "name": "google-search-service",
+  "version": "1.0.0",
+  "description": "Lightweight Google Search proxy using Playwright",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "playwright": "^1.40.0"
+  }
+}
